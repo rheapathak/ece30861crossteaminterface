@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 
 import httpx
@@ -66,11 +67,11 @@ async def compare_teams(
 
         try:
             url = f"{cleaned.rstrip('/')}/process"
-            response = httpx.post(
-                url,
-                files={"file": (file.filename, content, "application/pdf")},
-                timeout=30.0,
-            )
+            async with httpx.AsyncClient(timeout=60.0) as client:
+                response = await client.post(
+                    url,
+                    files={"file": (file.filename, content, "application/pdf")},
+                )
             try:
                 payload = response.json()
             except ValueError:
@@ -81,7 +82,7 @@ async def compare_teams(
                 "success": response.is_success,
                 "status_code": response.status_code,
                 "body": payload,
-                "error": None if response.is_success else payload.get("detail") or "Request failed",
+                "error": None if response.is_success else (payload.get("detail") or payload.get("message") or "Request failed"),
             }
         except httpx.HTTPError as exc:
             return {
@@ -92,12 +93,14 @@ async def compare_teams(
                 "error": f"Connection failed: {str(exc)}",
             }
 
-    result_a = call_team("Team A", team_a_url)
-    result_b = call_team("Team B", team_b_url)
+    result_a, result_b = await asyncio.gather(
+        call_team("Team A", team_a_url),
+        call_team("Team B", team_b_url),
+    )
 
     return {
-        "team_a": await result_a,
-        "team_b": await result_b,
+        "team_a": result_a,
+        "team_b": result_b,
     }
 
 
