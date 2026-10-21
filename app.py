@@ -1,18 +1,22 @@
 from __future__ import annotations
 
 import asyncio
+import os
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, Response
+
+TEAM3_API_URL = os.getenv("TEAM3_API_URL", "http://127.0.0.1:8001")
 
 app = FastAPI(
-    title="Cross-Team PDF Comparison Interface",
+    title="Cross-Team File Comparison Interface",
     version="0.1.0",
     description=(
-        "Minimal black-box evaluation platform for uploading a PDF to two separate "
+        "Minimal black-box evaluation platform for uploading a file to two separate "
         "team APIs and comparing their outputs."
     ),
 )
@@ -48,10 +52,7 @@ async def compare_teams(
     team_b_url: str = Form(...),
 ) -> dict[str, Any]:
     if not file.filename:
-        raise HTTPException(status_code=400, detail="A PDF file is required.")
-
-    if not file.filename.lower().endswith(".pdf"):
-        raise HTTPException(status_code=400, detail="Only PDF files are allowed.")
+        raise HTTPException(status_code=400, detail="A file is required.")
 
     content = await file.read()
 
@@ -70,7 +71,13 @@ async def compare_teams(
             async with httpx.AsyncClient(timeout=60.0) as client:
                 response = await client.post(
                     url,
-                    files={"file": (file.filename, content, "application/pdf")},
+                    files={
+                        "file": (
+                            file.filename,
+                            content,
+                            file.content_type or "application/octet-stream",
+                        )
+                    },
                 )
             try:
                 payload = response.json()
@@ -102,6 +109,61 @@ async def compare_teams(
         "team_a": result_a,
         "team_b": result_b,
     }
+
+
+@app.post("/api/team3/process", response_class=Response)
+async def process_with_team3(file: UploadFile = File(...)) -> Response:
+    if not file.filename:
+        raise HTTPException(status_code=400, detail="A file is required.")
+
+    filename = file.filename.rsplit("/", maxsplit=1)[-1].rsplit("\\", maxsplit=1)[-1]
+
+    content = await file.read()
+    if not content:
+        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+
+    try:
+        async with httpx.AsyncClient(timeout=30.0) as client:
+            response = await client.post(
+                f"{TEAM3_API_URL.rstrip('/')}/process",
+                files={
+                    "file": (
+                        filename,
+                        content,
+                        file.content_type or "application/octet-stream",
+                    )
+                },
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(
+            status_code=502,
+            detail=f"Could not reach the Team 3 processing service: {exc}",
+        ) from exc
+
+    if not response.is_success:
+        status_code = response.status_code if 400 <= response.status_code < 500 else 502
+        try:
+            error_body = response.json()
+        except ValueError:
+            error_body = response.text
+        if isinstance(error_body, dict):
+            detail = error_body.get("detail") or error_body.get("message")
+        else:
+            detail = error_body
+        raise HTTPException(
+            status_code=status_code,
+            detail=detail or f"Team 3 processing failed with status {response.status_code}.",
+        )
+
+    return Response(
+        content=response.content,
+        media_type=response.headers.get(
+            "content-type", file.content_type or "application/octet-stream"
+        ),
+        headers={
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"
+        },
+    )
 
 
 if __name__ == "__main__":

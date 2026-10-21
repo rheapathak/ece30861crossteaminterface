@@ -3,7 +3,7 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Cross-Team PDF Comparison</title>
+    <title>Cross-Team File Comparison</title>
     <style>
       body {
         font-family: Arial, sans-serif;
@@ -96,7 +96,21 @@
   </head>
   <body>
     <div class="container">
-      <h1>Cross-Team PDF Comparison</h1>
+      <h1>Cross-Team File Comparison</h1>
+
+      <div class="card" style="margin-bottom: 24px;">
+        <h2>Team 3 file pass-through</h2>
+        <p>Send any file to Team 3 and download the file returned by its processing endpoint.</p>
+        <form id="team3-form">
+          <div style="margin-bottom: 16px;">
+            <label for="team3File">Upload file for Team 3</label>
+            <input id="team3File" name="file" type="file" required />
+          </div>
+          <button type="submit">Process with Team 3</button>
+        </form>
+        <div id="team3Message" class="status" style="display:none;" role="status"></div>
+        <a id="team3Download" hidden>Download Team 3 output</a>
+      </div>
 
       <form id="compare-form">
         <div class="grid">
@@ -111,8 +125,8 @@
         </div>
 
         <div style="margin-bottom: 16px;">
-          <label for="pdfFile">Upload PDF</label>
-          <input id="pdfFile" name="file" type="file" accept="application/pdf" required />
+          <label for="uploadFile">Upload file</label>
+          <input id="uploadFile" name="file" type="file" required />
         </div>
 
         <button type="submit">Run comparison</button>

@@ -2,6 +2,48 @@ const form = document.getElementById('compare-form');
 const messageEl = document.getElementById('message');
 const teamAOutput = document.getElementById('teamAOutput');
 const teamBOutput = document.getElementById('teamBOutput');
+const team3Form = document.getElementById('team3-form');
+const team3Message = document.getElementById('team3Message');
+const team3Download = document.getElementById('team3Download');
+let team3DownloadUrl = null;
+
+team3Form.addEventListener('submit', async (event) => {
+  event.preventDefault();
+
+  const formData = new FormData(team3Form);
+  const file = formData.get('file');
+  if (!file || file.size === 0) {
+    showTeam3Message('Please select a file first.', 'error');
+    return;
+  }
+
+  showTeam3Message('Sending file to Team 3...', '');
+  team3Download.hidden = true;
+
+  try {
+    const response = await fetch('/api/team3/process', {
+      method: 'POST',
+      body: formData,
+    });
+
+    if (!response.ok) {
+      const error = await response.json();
+      throw new Error(error.detail || 'Team 3 processing request failed.');
+    }
+
+    const output = await response.blob();
+    if (team3DownloadUrl) {
+      URL.revokeObjectURL(team3DownloadUrl);
+    }
+    team3DownloadUrl = URL.createObjectURL(output);
+    team3Download.href = team3DownloadUrl;
+    team3Download.download = file.name;
+    team3Download.hidden = false;
+    showTeam3Message('Team 3 returned the file successfully.', 'success');
+  } catch (error) {
+    showTeam3Message(error.message || 'Team 3 processing failed.', 'error');
+  }
+});
 
 form.addEventListener('submit', async (event) => {
   event.preventDefault();
@@ -10,7 +52,7 @@ form.addEventListener('submit', async (event) => {
   const file = formData.get('file');
 
   if (!file || file.size === 0) {
-    showMessage('Please select a PDF file first.', 'error');
+    showMessage('Please select a file first.', 'error');
     return;
   }
 
@@ -22,7 +64,7 @@ form.addEventListener('submit', async (event) => {
     return;
   }
 
-  showMessage('Sending PDF to both systems...', '');
+  showMessage('Sending file to both systems...', '');
   teamAOutput.textContent = 'Waiting for response...';
   teamBOutput.textContent = 'Waiting for response...';
 
@@ -62,4 +104,13 @@ function showMessage(text, type) {
     messageEl.classList.add(type);
   }
   messageEl.style.display = 'block';
+}
+
+function showTeam3Message(text, type) {
+  team3Message.textContent = text;
+  team3Message.className = 'status';
+  if (type) {
+    team3Message.classList.add(type);
+  }
+  team3Message.style.display = 'block';
 }

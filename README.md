@@ -1,12 +1,12 @@
-# Cross-Team PDF Comparison Interface
+# Cross-Team File Comparison Interface
 
-This project is a minimal black-box prototype for comparing two teams' PDF-processing APIs without exposing either team's internal code.
+This project is a minimal black-box prototype for comparing two teams' file-processing APIs without exposing either team's internal code.
 
 ## What this platform does
 
-- Upload a PDF from the browser
-- Send that PDF to a configurable Team A endpoint
-- Send the same PDF to a configurable Team B endpoint
+- Upload any file from the browser
+- Send that file to a configurable Team A endpoint
+- Send the same file to a configurable Team B endpoint
 - Show both responses in one place
 - Handle unreachable, invalid, or failed endpoints gracefully
 
@@ -46,17 +46,17 @@ Each team should provide:
 
 - `POST /process`
 - Accept `multipart/form-data`
-- Expect a PDF file under the field name `file`
+- Expect a file under the field name `file`
 
 Example request:
 
 ```bash
 curl -X POST \
-  -F "file=@example.pdf" \
+  -F "file=@example.txt" \
   https://team-a.example.com/process
 ```
 
-This is the key black-box interface. The platform should be able to send any valid PDF and receive structured output without knowing anything about the team’s internal architecture.
+This is the key black-box interface. The platform accepts files of any type and forwards the file's name and content type. Each team service is responsible for deciding which file types it can process; the platform does not validate file extensions.
 
 ### 4. Return a consistent JSON response
 Each team must return JSON in the same shape so the platform can compare outputs reliably.
@@ -94,7 +94,7 @@ If the uploaded file is invalid or the processing fails, the service should retu
 
 Examples:
 
-- `400 Bad Request` for malformed or non-PDF files
+- `400 Bad Request` for malformed or unsupported files
 - `401 Unauthorized` for missing or invalid authentication
 - `500 Internal Server Error` for internal processing issues
 
@@ -103,7 +103,7 @@ Example error response:
 ```json
 {
   "status": "error",
-  "message": "Invalid PDF upload"
+  "message": "Invalid file upload"
 }
 ```
 
@@ -171,7 +171,7 @@ This is only an example. The actual implementation may differ completely, but th
 The platform expects the following contract from each team:
 
 - `GET /health` -> returns healthy status
-- `POST /process` -> accepts a PDF in a multipart upload
+- `POST /process` -> accepts a file in a multipart upload
 - Response body is JSON and follows the same schema
 - HTTP status codes are used consistently for success and failure
 - The service is reachable over the network
@@ -196,9 +196,28 @@ Then open:
 
 1. Enter the base URL for Team A, for example `https://team-a.example.com`
 2. Enter the base URL for Team B, for example `https://team-b.example.com`
-3. Upload a PDF
+3. Upload a file of any type
 4. Click "Run comparison"
 5. Review the returned JSON for each team
+
+## Team 3 file pass-through
+
+The page also has a dedicated Team 3 pass-through form. It sends the selected
+file to `POST /process` on the Team 3 service and offers the returned file for
+download. The current Team 3 endpoint is intentionally a no-op: it returns
+the uploaded file bytes unchanged.
+
+Start the Team 3 service separately on port 8001 from its project directory:
+
+```bash
+cd ../team-3-project
+uvicorn app:app --host 0.0.0.0 --port 8001
+```
+
+The interface uses `http://127.0.0.1:8001` by default; set `TEAM3_API_URL`
+before starting the interface to point to a different Team 3 service. This
+pass-through flow is separate from the JSON comparison flow above, so it does
+not require or invoke the other team's endpoint.
 
 ## Important note
 
