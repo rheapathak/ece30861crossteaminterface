@@ -1,117 +1,106 @@
+import base64
+from hashlib import sha256
+from io import BytesIO
+import json
+import unittest
 from unittest.mock import AsyncMock, patch
+from uuid import uuid4
+from zipfile import ZipFile
 
 import httpx
 from fastapi.testclient import TestClient
-
-from app import app
-
-client = TestClient(app)
+from app import app, SPEC
 
 
-def test_compare_teams_accepts_non_pdf_and_preserves_content_type() -> None:
-    responses = [
-        httpx.Response(
-            200,
-            json={"status": "success"},
-            request=httpx.Request("POST", f"http://team-{team}.example.com/process"),
-        )
-        for team in ("a", "b")
-    ]
-
-    with patch(
-        "app.httpx.AsyncClient.post",
-        new_callable=AsyncMock,
-        side_effect=responses,
-    ) as post:
-        response = client.post(
-            "/api/compare",
-            data={
-                "team_a_url": "http://team-a.example.com",
-                "team_b_url": "http://team-b.example.com",
-            },
-            files={"file": ("sample.txt", b"plain text", "text/plain")},
-        )
-
-    assert response.status_code == 200
-    assert response.json()["team_a"]["success"] is True
-    assert response.json()["team_b"]["success"] is True
-    assert post.await_count == 2
-    for call in post.await_args_list:
-        assert call.kwargs["files"]["file"] == (
-            "sample.txt",
-            b"plain text",
-            "text/plain",
-        )
+def response(payload, status=200):
+    return httpx.Response(status, json=payload, request=httpx.Request("POST", "http://team.example/process"))
 
 
-def test_team3_proxy_returns_output_file() -> None:
-    pdf_bytes = b"%PDF-1.4\nplaceholder PDF bytes\n"
-    upstream_response = httpx.Response(
-        200,
-        content=pdf_bytes,
-        headers={"content-type": "application/pdf"},
-        request=httpx.Request("POST", "http://127.0.0.1:8001/process"),
-    )
-
-    with patch(
-        "app.httpx.AsyncClient.post",
-        new_callable=AsyncMock,
-        return_value=upstream_response,
-    ) as post:
-        response = client.post(
-            "/api/team3/process",
-            files={"file": ("sample.pdf", pdf_bytes, "application/pdf")},
-        )
-
-    assert response.status_code == 200
-    assert response.content == pdf_bytes
-    assert response.headers["content-type"] == "application/pdf"
-    assert "filename*=UTF-8''sample.pdf" in response.headers["content-disposition"]
-    assert post.await_count == 1
+def completed():
+    content = b"%PDF-1.4\nexample bytes"
+    pdf = {"file_name": "sample_EDITED.pdf", "media_type": "application/pdf", "sha256": sha256(content).hexdigest(), "modified": False, "content_base64": base64.b64encode(content).decode()}
+    return {"evaluation_id": str(uuid4()), "status": "completed", "input": {"file_name": "sample.pdf", "sha256": sha256(content).hexdigest(), "size_bytes": len(content)}, "outcome": "completed_no_repairs", "checks_performed": [], "findings": [], "repairs": [], "new_issues_after_repair": [], "human_review_items": [], "summary": {"total_issues": 0, "fixed_count": 0, "human_review_count": 0}, "limitations": ["Validation only; accessibility checks not performed."], "compliance_statement": "This report does not certify ADA Title II or WCAG 2.1 conformance.", "output_pdf": pdf, "report_pdf": {**pdf, "file_name": "sample_report.pdf"}}
 
 
-def test_team3_proxy_accepts_non_pdf_and_preserves_content_type() -> None:
-    response_bytes = b"processed text file"
-    upstream_response = httpx.Response(
-        200,
-        content=response_bytes,
-        headers={"content-type": "text/plain"},
-        request=httpx.Request("POST", "http://127.0.0.1:8001/process"),
-    )
-    with patch(
-        "app.httpx.AsyncClient.post",
-        new_callable=AsyncMock,
-        return_value=upstream_response,
-    ) as post:
-        response = client.post(
-            "/api/team3/process",
-            files={"file": ("sample.txt", b"plain text", "text/plain")},
-        )
+class InterfaceContractTests(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(app)
 
-    assert response.status_code == 200
-    assert response.content == response_bytes
-    assert response.headers["content-type"] == "text/plain; charset=utf-8"
-    assert "filename*=UTF-8''sample.txt" in response.headers["content-disposition"]
-    forwarded_file = post.await_args.kwargs["files"]["file"]
-    assert forwarded_file == ("sample.txt", b"plain text", "text/plain")
+    def upload(self, path="/api/team3/process", content=b"original", filename="sample.pdf", data=None):
+        return self.client.post(path, files={"file": (filename, content, "application/octet-stream")}, data=data)
+
+    def test_proxy_builds_zip_from_standard_completed_json(self):
+        payload = completed()
+        with patch("app.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response(payload)) as post:
+            result = self.upload(content=b"%PDF-1.4\nexample bytes")
+        self.assertEqual(result.status_code, 200)
+        self.assertEqual(post.await_args.kwargs["headers"]["Accept"], "application/json")
+        with ZipFile(BytesIO(result.content)) as archive:
+            self.assertEqual(set(archive.namelist()), {"report.json", "sample.pdf", "sample_EDITED.pdf", "sample_report.pdf"})
+            self.assertEqual(archive.read("sample.pdf"), b"%PDF-1.4\nexample bytes")
+            self.assertEqual(json.loads(archive.read("report.json")), payload)
+
+    def test_proxy_error_zip_has_only_original_and_json(self):
+        payload = {"status": "error", "error_code": "INVALID_FILE_TYPE", "message": "Input must be a PDF."}
+        with patch("app.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response(payload, 415)):
+            result = self.upload(content=b"text", filename="notes.txt")
+        self.assertEqual(result.status_code, 200)
+        with ZipFile(BytesIO(result.content)) as archive:
+            self.assertEqual(set(archive.namelist()), {"report.json", "notes.txt"})
+            self.assertEqual(archive.read("notes.txt"), b"text")
+
+    def test_proxy_rejects_old_schema_and_bad_pdf_hash(self):
+        bad_hash = completed()
+        bad_hash["output_pdf"]["sha256"] = "wrong"
+        for payload in [{"status": "accepted"}, bad_hash]:
+            with self.subTest(payload=payload["status"]):
+                with patch("app.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response(payload)):
+                    self.assertEqual(self.upload().status_code, 502)
+
+    def test_proxy_reports_external_failure(self):
+        payload = {"status": "error", "error_code": "EXTERNAL_SERVICE_UNAVAILABLE", "message": "Unavailable"}
+        with patch("app.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response(payload, 503)):
+            self.assertEqual(self.upload().status_code, 502)
+
+    def test_comparison_runs_session_workflow_and_forwards_all_file_types(self):
+        sessions = []
+        async def post(url, **kwargs):
+            if url.endswith("/test/setup"):
+                self.assertEqual(kwargs["timeout"], 10.0)
+                session = kwargs["json"]["session_id"]
+                sessions.append(session)
+                return response({"session_id": session}, 201)
+            self.assertIn(kwargs["data"]["session_id"], sessions)
+            self.assertEqual(kwargs["files"]["file"], ("notes.txt", b"text", "application/octet-stream"))
+            return response({"status": "error", "error_code": "INVALID_FILE_TYPE", "message": "Not PDF"}, 415)
+        async def get(url, **kwargs):
+            if url.endswith("/health"):
+                return response({"status": "ok", "spec_version": "0.3.0"})
+            if url.endswith("/checks"):
+                return response({"checks": []})
+            return response({"session_id": kwargs["params"]["session_id"], "coverage": {"code": {"covered": None, "total": None, "basis": "Unavailable"}}})
+        with patch("app.httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=post), patch("app.httpx.AsyncClient.get", new_callable=AsyncMock, side_effect=get):
+            result = self.upload("/api/compare", b"text", "notes.txt", {"team_a_url": "http://team-a", "team_b_url": "http://team-b"}).json()
+        self.assertEqual(len(set(sessions)), 2)
+        for key in ("team_a", "team_b"):
+            self.assertTrue(result[key]["contract_valid"])
+            self.assertFalse(result[key]["success"])
+            self.assertEqual(result[key]["body"]["error_code"], "INVALID_FILE_TYPE")
+
+    def test_failed_setup_does_not_run_project_calls(self):
+        with patch("app.httpx.AsyncClient.post", new_callable=AsyncMock, return_value=response({"source": "system", "message": "Setup failed"}, 500)) as post, patch("app.httpx.AsyncClient.get", new_callable=AsyncMock) as get:
+            result = self.upload("/api/compare", data={"team_a_url": "http://a", "team_b_url": "http://b"}).json()
+        self.assertEqual(post.await_count, 2)
+        self.assertEqual(get.await_count, 0)
+        self.assertFalse(result["team_a"]["success"])
+
+    def test_timeout_is_communication_error_without_retries(self):
+        with patch("app.httpx.AsyncClient.post", new_callable=AsyncMock, side_effect=httpx.ReadTimeout("Timed out")) as post:
+            result = self.upload("/api/compare", data={"team_a_url": "http://a", "team_b_url": "http://b"}).json()
+        self.assertEqual(post.await_count, 2)
+        self.assertEqual(result["team_a"]["source"], "communication")
+        self.assertEqual(result["team_a"]["outcome"], "error")
 
 
-def test_team3_proxy_reports_upstream_failure() -> None:
-    upstream_response = httpx.Response(
-        503,
-        text="service unavailable",
-        request=httpx.Request("POST", "http://127.0.0.1:8001/process"),
-    )
-
-    with patch(
-        "app.httpx.AsyncClient.post",
-        new_callable=AsyncMock,
-        return_value=upstream_response,
-    ):
-        response = client.post(
-            "/api/team3/process",
-            files={"file": ("sample.pdf", b"%PDF", "application/pdf")},
-        )
-
-    assert response.status_code == 502
-    assert response.json() == {"detail": "service unavailable"}
+if __name__ == "__main__":
+    unittest.main()

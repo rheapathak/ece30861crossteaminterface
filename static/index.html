@@ -99,8 +99,8 @@
       <h1>Cross-Team File Comparison</h1>
 
       <div class="card" style="margin-bottom: 24px;">
-        <h2>Team 3 file pass-through</h2>
-        <p>Download a ZIP with the JSON review report and unchanged original. Accepted uploads also include a blank _EDITED.pdf. Rejected uploads contain only the report and original.</p>
+        <h2>Team 3 review download</h2>
+        <p>Download a ZIP with the JSON review report and unchanged original. Valid uploads also include an output PDF and report PDF. Invalid uploads contain only the JSON error and original.</p>
         <form id="team3-form">
           <div style="margin-bottom: 16px;">
             <label for="team3File">Upload file for Team 3</label>
@@ -137,10 +137,12 @@
       <div class="result-grid">
         <div class="card">
           <h3>Team A response</h3>
+          <div id="teamADownloads"></div>
           <pre id="teamAOutput">Waiting for test...</pre>
         </div>
         <div class="card">
           <h3>Team B response</h3>
+          <div id="teamBDownloads"></div>
           <pre id="teamBOutput">Waiting for test...</pre>
         </div>
       </div>
