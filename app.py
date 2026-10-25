@@ -2,6 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import os
+import json
+from io import BytesIO
+from pathlib import PurePosixPath
+from zipfile import BadZipFile, ZipFile
 from typing import Any
 from urllib.parse import quote
 
@@ -119,13 +123,15 @@ async def process_with_team3(file: UploadFile = File(...)) -> Response:
     filename = file.filename.rsplit("/", maxsplit=1)[-1].rsplit("\\", maxsplit=1)[-1]
 
     content = await file.read()
-    if not content:
-        raise HTTPException(status_code=400, detail="The uploaded file is empty.")
+    await file.close()
+    stem = PurePosixPath(filename).stem
+    original_name = "original/report.json" if filename == "report.json" else filename
 
     try:
         async with httpx.AsyncClient(timeout=30.0) as client:
             response = await client.post(
                 f"{TEAM3_API_URL.rstrip('/')}/process",
+                headers={"Accept": "application/zip"},
                 files={
                     "file": (
                         filename,
@@ -155,13 +161,42 @@ async def process_with_team3(file: UploadFile = File(...)) -> Response:
             detail=detail or f"Team 3 processing failed with status {response.status_code}.",
         )
 
+    # Never disguise a JSON report (for example from an older server) as a ZIP.
+    if response.headers.get("content-type", "").split(";", 1)[0].strip().lower() != "application/zip":
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                "Team 3 did not return a ZIP. Restart the updated Team 3 service "
+                f"at {TEAM3_API_URL}; check that TEAM3_API_URL points to the correct service."
+            ),
+        )
+    try:
+        with ZipFile(BytesIO(response.content)) as archive:
+            report = json.loads(archive.read("report.json"))
+            if not isinstance(report, dict) or report.get("status") not in {"accepted", "rejected"}:
+                raise ValueError("Invalid report")
+            expected = {original_name, "report.json"}
+            if report["status"] == "accepted":
+                expected.add(stem + "_EDITED.pdf")
+            if set(archive.namelist()) != expected or archive.testzip() is not None:
+                raise ValueError("Missing or damaged output files")
+            if archive.read(original_name) != content:
+                raise ValueError("Original PDF differs from the upload")
+            if report["status"] == "accepted" and not archive.read(stem + "_EDITED.pdf").startswith(b"%PDF-"):
+                raise ValueError("Edited placeholder is not a PDF")
+    except (BadZipFile, ValueError, KeyError, RuntimeError, OSError) as exc:
+        raise HTTPException(
+            status_code=502,
+            detail="Team 3 returned an invalid or incomplete ZIP; the download was blocked.",
+        ) from exc
+
     return Response(
         content=response.content,
         media_type=response.headers.get(
             "content-type", file.content_type or "application/octet-stream"
         ),
         headers={
-            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(filename)}"
+            "Content-Disposition": f"attachment; filename*=UTF-8''{quote(stem + '_review.zip', safe='')}"
         },
     )
 

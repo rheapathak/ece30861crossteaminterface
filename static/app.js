@@ -12,7 +12,7 @@ team3Form.addEventListener('submit', async (event) => {
 
   const formData = new FormData(team3Form);
   const file = formData.get('file');
-  if (!file || file.size === 0) {
+  if (!file || !file.name) {
     showTeam3Message('Please select a file first.', 'error');
     return;
   }
@@ -31,15 +31,21 @@ team3Form.addEventListener('submit', async (event) => {
       throw new Error(error.detail || 'Team 3 processing request failed.');
     }
 
+    if (!response.headers.get('content-type')?.toLowerCase().startsWith('application/zip')) {
+      throw new Error('The interface did not return a ZIP. Restart the updated interface service.');
+    }
     const output = await response.blob();
+    if (output.size === 0) {
+      throw new Error('The returned ZIP is empty.');
+    }
     if (team3DownloadUrl) {
       URL.revokeObjectURL(team3DownloadUrl);
     }
     team3DownloadUrl = URL.createObjectURL(output);
     team3Download.href = team3DownloadUrl;
-    team3Download.download = file.name;
+    team3Download.download = file.name.replace(/(?!^)\.[^.]+$/, '') + '_review.zip';
     team3Download.hidden = false;
-    showTeam3Message('Team 3 returned the file successfully.', 'success');
+    showTeam3Message('Download the review ZIP. Rejected uploads include the original file and JSON report; accepted uploads also include the blank edited PDF.', 'success');
   } catch (error) {
     showTeam3Message(error.message || 'Team 3 processing failed.', 'error');
   }
