@@ -30,7 +30,24 @@ formatted 415 error is contract-valid but indicates the file was rejected.
 The screen omits long Base64 strings and provides JSON and PDF downloads.
 Null coverage means instrumentation is unavailable, not zero coverage.
 
-## Team 3 ZIP download
+## One upload, two review downloads
+
+The page has one file picker and one Run both reviews button. The same uploaded
+file is sent to each entered team URL. Each result shows that team's JSON,
+Download Team A/B review ZIP button, and individual JSON/PDF links. A failure
+from one team does not remove the other team's result. Selecting a new file or
+changing a URL clears previous results and downloads.
+
+POST /api/review-download receives the original file plus the exact JSON result
+from the completed comparison (as uploaded field report). It verifies the schema,
+PDF hashes and input metadata, then packages a ZIP without making any further
+calls to either team. Thus report.json matches the displayed review, including
+its evaluation_id. All data remains in the browser/request; nothing is retained
+on the interface server. Successful ZIPs contain JSON, original, output PDF and
+report PDF. Rejected ZIPs contain JSON and original only. Base64 PDF data is
+omitted from the preview; the JSON download and ZIP retain the complete result.
+
+## Legacy Team 3 ZIP endpoint
 
 POST /api/team3/process calls Team 3's standard JSON API, then packages that JSON,
 the original upload and (on completion) its output/report PDFs into a ZIP. Invalid

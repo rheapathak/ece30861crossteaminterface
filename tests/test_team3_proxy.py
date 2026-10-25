@@ -1,4 +1,5 @@
 import base64
+import re
 from hashlib import sha256
 from io import BytesIO
 import json
@@ -100,6 +101,59 @@ class InterfaceContractTests(unittest.TestCase):
         self.assertEqual(post.await_count, 2)
         self.assertEqual(result["team_a"]["source"], "communication")
         self.assertEqual(result["team_a"]["outcome"], "error")
+
+
+class UnifiedDownloadTests(unittest.TestCase):
+    def setUp(self):
+        self.client = TestClient(app)
+
+    def download(self, payload, content=b"%PDF-1.4\nexample bytes", filename="sample.pdf"):
+        raw = payload if isinstance(payload, bytes) else json.dumps(payload).encode()
+        return self.client.post("/api/review-download", files={"file": (filename, content, "application/octet-stream"), "report": ("report.json", raw, "application/json")})
+
+    def test_exact_result_is_packaged_without_rerunning_team(self):
+        payload = completed()
+        with patch("app.httpx.AsyncClient.post", new_callable=AsyncMock) as post:
+            result = self.download(payload)
+        self.assertEqual(result.status_code, 200)
+        post.assert_not_awaited()
+        with ZipFile(BytesIO(result.content)) as archive:
+            self.assertEqual(set(archive.namelist()), {"report.json", "sample.pdf", "sample_EDITED.pdf", "sample_report.pdf"})
+            self.assertEqual(json.loads(archive.read("report.json")), payload)
+            self.assertEqual(archive.read("sample.pdf"), b"%PDF-1.4\nexample bytes")
+
+    def test_rejected_result_has_only_original_and_json(self):
+        payload = {"status": "error", "error_code": "INVALID_FILE_TYPE", "message": "Not PDF"}
+        result = self.download(payload, b"text", "notes.txt")
+        self.assertEqual(result.status_code, 200)
+        with ZipFile(BytesIO(result.content)) as archive:
+            self.assertEqual(set(archive.namelist()), {"report.json", "notes.txt"})
+            self.assertEqual(json.loads(archive.read("report.json")), payload)
+
+    def test_invalid_json_or_contract_is_rejected(self):
+        for value in [b"not JSON", [], {"status": "accepted"}]:
+            with self.subTest(value=value):
+                self.assertEqual(self.download(value).status_code, 400)
+
+    def test_wrong_original_or_corrupt_pdf_is_rejected(self):
+        self.assertEqual(self.download(completed(), b"different original").status_code, 400)
+        payload = completed()
+        payload["report_pdf"]["sha256"] = "wrong"
+        self.assertEqual(self.download(payload).status_code, 400)
+
+    def test_report_filename_collision_preserves_both(self):
+        payload = {"status": "error", "error_code": "INVALID_FILE_TYPE", "message": "Not PDF"}
+        result = self.download(payload, b"original JSON bytes", "report.json")
+        with ZipFile(BytesIO(result.content)) as archive:
+            self.assertEqual(set(archive.namelist()), {"report.json", "original/report.json"})
+            self.assertEqual(archive.read("original/report.json"), b"original JSON bytes")
+
+    def test_page_has_one_file_picker_and_both_result_sections(self):
+        page = self.client.get("/").text
+        self.assertEqual(len(re.findall(r'<input\b[^>]*\btype="file"', page)), 1)
+        self.assertNotIn('team3-form', page)
+        for text in ["Run both reviews", "teamAOutput", "teamBOutput", "teamADownloads", "teamBDownloads"]:
+            self.assertIn(text, page)
 
 
 if __name__ == "__main__":

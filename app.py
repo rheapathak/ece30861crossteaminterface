@@ -14,6 +14,7 @@ import httpx
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, Response
+from starlette.concurrency import run_in_threadpool
 
 from contract import load_contract, validate_payload
 
@@ -141,6 +142,10 @@ async def process_with_team3(file: UploadFile = File(...)):
         raise HTTPException(502, "Team 3 did not return the shared v0.3.0 JSON contract: " + "; ".join(errors))
     if response.status_code not in {200, 400, 413, 415, 422}:
         raise HTTPException(502, payload.get("message", "Team 3 processing failed."))
+    return await run_in_threadpool(build_review_zip, filename, content, payload)
+
+
+def build_review_zip(filename, content, payload):
     archive = BytesIO()
     with ZipFile(archive, "w", compression=ZIP_STORED) as output:
         output.writestr("report.json", json.dumps(payload, indent=2).encode("utf-8"))
@@ -153,3 +158,27 @@ async def process_with_team3(file: UploadFile = File(...)):
                 output.writestr(name, b64decode(payload[key]["content_base64"], validate=True))
     stem = PurePosixPath(filename).stem
     return Response(archive.getvalue(), media_type="application/zip", headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(stem + '_review.zip', safe='')}"})
+
+
+@app.post("/api/review-download", response_class=Response)
+async def review_download(file: UploadFile = File(...), report: UploadFile = File(...)):
+    """Package the exact displayed result; never re-run either team's processing."""
+    try:
+        if not file.filename:
+            raise HTTPException(400, "A file is required.")
+        filename = file.filename.replace("\\", "/").rsplit("/", 1)[-1]
+        content = await file.read()
+        try:
+            payload = json.loads(await report.read())
+        except (ValueError, UnicodeError) as exc:
+            raise HTTPException(400, "The review report is not valid JSON.") from exc
+        schema = "EvaluationResult" if isinstance(payload, dict) and payload.get("status") == "completed" else "Error"
+        errors = validate_payload(SPEC, schema, payload)
+        if not errors:
+            errors.extend(input_errors(payload, filename, content))
+        if errors:
+            raise HTTPException(400, "Invalid review report: " + "; ".join(errors))
+        return await run_in_threadpool(build_review_zip, filename, content, payload)
+    finally:
+        await file.close()
+        await report.close()

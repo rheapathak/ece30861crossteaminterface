@@ -92,6 +92,38 @@
           }
         }
       }
+    },
+    "/api/review-download": {
+      "post": {
+        "summary": "Review Download",
+        "description": "Package the exact displayed result; never re-run either team's processing.",
+        "operationId": "review_download_api_review_download_post",
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_review_download_api_review_download_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "description": "Validation Error",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            }
+          }
+        }
+      }
     }
   },
   "components": {
@@ -133,6 +165,26 @@
           "file"
         ],
         "title": "Body_process_with_team3_api_team3_process_post"
+      },
+      "Body_review_download_api_review_download_post": {
+        "properties": {
+          "file": {
+            "type": "string",
+            "format": "binary",
+            "title": "File"
+          },
+          "report": {
+            "type": "string",
+            "format": "binary",
+            "title": "Report"
+          }
+        },
+        "type": "object",
+        "required": [
+          "file",
+          "report"
+        ],
+        "title": "Body_review_download_api_review_download_post"
       },
       "HTTPValidationError": {
         "properties": {
