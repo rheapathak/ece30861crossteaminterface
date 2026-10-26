@@ -87,6 +87,12 @@
       .status.error {
         color: #b91c1c;
       }
+      .downloads { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; }
+      .downloads a { color: #1d4ed8; }
+      .downloads button { padding: 10px 12px; font-size: .9rem; }
+      button:disabled { opacity: .55; cursor: default; }
+      .note { color: #536174; line-height: 1.6; font-size: .9rem; }
+      pre { max-height: 640px; }
       @media (max-width: 700px) {
         .grid, .result-grid {
           grid-template-columns: 1fr;
@@ -98,50 +104,43 @@
     <div class="container">
       <h1>Cross-Team File Comparison</h1>
 
-      <div class="card" style="margin-bottom: 24px;">
-        <h2>Team 3 file pass-through</h2>
-        <p>Send any file to Team 3 and download the file returned by its processing endpoint.</p>
-        <form id="team3-form">
-          <div style="margin-bottom: 16px;">
-            <label for="team3File">Upload file for Team 3</label>
-            <input id="team3File" name="file" type="file" required />
-          </div>
-          <button type="submit">Process with Team 3</button>
-        </form>
-        <div id="team3Message" class="status" style="display:none;" role="status"></div>
-        <a id="team3Download" hidden>Download Team 3 output</a>
-      </div>
+      <p>Choose one file to review with both teams. Each team returns its own JSON and review ZIP.</p>
 
       <form id="compare-form">
         <div class="grid">
           <div>
             <label for="teamAUrl">Team A base URL</label>
-            <input id="teamAUrl" name="team_a_url" type="text" placeholder="https://team-a.example.com" value="" />
+            <input id="teamAUrl" name="team_a_url" type="text" placeholder="https://team-a.example.com" value="" required />
           </div>
           <div>
             <label for="teamBUrl">Team B base URL</label>
-            <input id="teamBUrl" name="team_b_url" type="text" placeholder="https://team-b.example.com" value="" />
+            <input id="teamBUrl" name="team_b_url" type="text" placeholder="https://team-b.example.com" value="" required />
           </div>
         </div>
 
         <div style="margin-bottom: 16px;">
-          <label for="uploadFile">Upload file</label>
+          <label for="uploadFile">File for both teams</label>
           <input id="uploadFile" name="file" type="file" required />
         </div>
 
-        <button type="submit">Run comparison</button>
+        <button id="run-button" type="submit">Run both reviews</button>
       </form>
 
-      <div id="message" class="status" style="display:none;"></div>
+      <p class="note">Valid inputs: JSON, original, output PDF, and report PDF. Rejected inputs: JSON and original only.</p>
+      <div id="message" class="status" role="status" aria-live="polite"></div>
 
       <div class="result-grid">
         <div class="card">
-          <h3>Team A response</h3>
-          <pre id="teamAOutput">Waiting for test...</pre>
+          <h3>Team A review</h3>
+          <p id="teamAStatus" role="status" aria-live="polite"></p>
+          <div id="teamADownloads" class="downloads"></div>
+          <pre id="teamAOutput">Choose a file and run both reviews.</pre>
         </div>
         <div class="card">
-          <h3>Team B response</h3>
-          <pre id="teamBOutput">Waiting for test...</pre>
+          <h3>Team B review</h3>
+          <p id="teamBStatus" role="status" aria-live="polite"></p>
+          <div id="teamBDownloads" class="downloads"></div>
+          <pre id="teamBOutput">Choose a file and run both reviews.</pre>
         </div>
       </div>
     </div>
