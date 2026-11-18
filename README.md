@@ -64,3 +64,9 @@ uses the URLs entered into the form independently of this environment variable.
 
 The interface's own API explorer is at /docs and generated schema at /openapi.json.
 Restart after changes; deployed services require a new deployment.
+
+## Deploying
+
+Every push runs CI (ruff + unit tests); a push to `main` that passes CI deploys to Cloud Run automatically.
+Run `gh run watch --exit-status` after pushing: green ✓ = live; red ✗ = nothing deployed (GitHub also emails you; open the red step for the error).
+To redeploy `main` without a new commit: Actions → CI/CD → Run workflow.
