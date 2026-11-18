@@ -10,7 +10,7 @@ from zipfile import ZipFile
 
 import httpx
 from fastapi.testclient import TestClient
-from app import app, SPEC
+from app import app
 
 
 def response(payload, status=200):
